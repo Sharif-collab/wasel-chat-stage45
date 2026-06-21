@@ -1,1 +1,1 @@
-web: gunicorn wasel_chat_STAGE39_CHAT_DESIGN_CLEAN:app
+web: gunicorn wasel_chat_STAGE45_NEW_USER_CONTACT_STATUS_ONLY:app

@@ -885,7 +885,7 @@ CSS += r"""
 def page(body, title=APP_NAME):
     body = inject_csrf(body)
     token = session.get('_csrf_token', '')
-    return f"""<!doctype html><html lang='ar' dir='rtl'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='csrf-token' content='{token}'><title>{h(title)}</title><style>{CSS}</style></head><body><div class='phone'>{body}</div><script>
+    return rf"""<!doctype html><html lang='ar' dir='rtl'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='csrf-token' content='{token}'><title>{h(title)}</title><style>{CSS}</style></head><body><div class='phone'>{body}</div><script>
 function csrf(){{return document.querySelector('meta[name="csrf-token"]')?.content||''}}
 
 function toggleStatusCircle(id,e){{if(e){{e.preventDefault();e.stopPropagation();}}document.querySelectorAll('.statusReactionCircle').forEach(x=>{{if(x.id!=='statusReact_'+id)x.classList.remove('show')}});let el=document.getElementById('statusReact_'+id); if(el) el.classList.toggle('show')}}
