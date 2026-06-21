@@ -16,6 +16,7 @@ import re
 import time
 import secrets
 import smtplib
+import threading
 from email.mime.text import MIMEText
 from email.header import Header
 escape = html.escape
@@ -577,8 +578,19 @@ def create_email_verify_code(user_id, email):
 
 فريق واصل شات
 """
-    ok, info = send_mail(email, "رمز تحقق واصل شات", body)
-    return code, ok, info
+    # إرسال البريد في الخلفية لضمان سرعة استجابة الموقع للمستخدم
+    def send_bg():
+        try:
+            # نفتح اتصال جديد لقاعدة البيانات داخل الـ thread إذا لزم الأمر، 
+            # ولكن هنا فقط نحتاج لإرسال البريد.
+            send_mail(email, "رمز تحقق واصل شات", body)
+        except Exception as e:
+            print(f"BG_EMAIL_ERROR: {e}")
+
+    threading.Thread(target=send_bg, daemon=True).start()
+    
+    # نعيد True دائماً للواجهة لأن الإرسال بدأ في الخلفية، والسرعة ستكون فائقة
+    return code, True, "SENDING_IN_BACKGROUND"
 
 
 def verify_pending_user_id():
@@ -1391,12 +1403,11 @@ def forgot():
             db().execute("INSERT INTO reset_codes(ident,code,expires_at,created_at) VALUES(?,?,?,?)", (ident, code, exp, now()))
             db().commit()
             if u['email']:
-                ok, info = send_mail(u['email'], 'رمز استعادة كلمة مرور واصل شات', f'رمز استعادة كلمة المرور هو: {code}\nالرمز صالح لمدة 10 دقائق.')
-                if ok:
-                    msg = 'تم إرسال رمز استعادة كلمة المرور إلى البريد'
-                else:
-                    code_show = f"<div class='card'><b>رمز التجربة:</b> <span class='badge'>{code}</span><br><span class='muted'>SMTP غير مضبوط أو فشل الإرسال.</span></div>"
-                    msg = 'تم إنشاء الرمز، لكن البريد لم يُرسل'
+                # إرسال بريد استعادة كلمة المرور في الخلفية للسرعة
+                def send_reset_bg():
+                    send_mail(u['email'], 'رمز استعادة كلمة مرور واصل شات', f'رمز استعادة كلمة المرور هو: {code}\nالرمز صالح لمدة 10 دقائق.')
+                threading.Thread(target=send_reset_bg, daemon=True).start()
+                msg = 'تم إرسال رمز استعادة كلمة المرور إلى البريد (جاري الإرسال...)'
             else:
                 code_show = f"<div class='card'><b>رمز التجربة:</b> <span class='badge'>{code}</span></div>"
                 msg = 'تم إنشاء رمز استعادة كلمة المرور'
