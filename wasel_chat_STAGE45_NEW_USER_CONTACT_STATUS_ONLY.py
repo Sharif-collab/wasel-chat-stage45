@@ -518,21 +518,38 @@ def smtp_ready():
 
 
 def send_mail(to_email, subject, body):
+    """
+    إرسال بريد إلكتروني عبر SMTP مع تحسين معالجة الأخطاء.
+    إذا فشل الإرسال، سيتم تسجيل الخطأ وإرجاع النتيجة.
+    """
     if not smtp_ready():
-        return False, "SMTP غير مضبوط"
+        return False, "SMTP_NOT_CONFIGURED"
+    
     try:
         msg = MIMEText(body, "plain", "utf-8")
         msg["Subject"] = Header(subject, "utf-8")
-        msg["From"] = str(Header(EMAIL_FROM, "utf-8")) + f" <{EMAIL_USER}>"
+        msg["From"] = f"{Header(EMAIL_FROM, 'utf-8')} <{EMAIL_USER}>"
         msg["To"] = to_email
-        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=20) as server:
-            server.starttls()
-            server.login(EMAIL_USER, EMAIL_PASS)
+        
+        # استخدام context manager لضمان إغلاق الاتصال
+        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=25) as server:
+            server.ehlo()
+            if server.has_extn("STARTTLS"):
+                server.starttls()
+                server.ehlo()
+            
+            try:
+                server.login(EMAIL_USER, EMAIL_PASS)
+            except smtplib.SMTPAuthenticationError:
+                return False, "AUTHENTICATION_FAILED"
+            
             server.sendmail(EMAIL_USER, [to_email], msg.as_string())
-        return True, "تم الإرسال"
+            
+        return True, "SENT_SUCCESSFULLY"
     except Exception as e:
-        print("EMAIL_SEND_ERROR:", e)
-        return False, str(e)
+        error_msg = str(e)
+        print(f"SMTP_ERROR: {error_msg}")
+        return False, error_msg
 
 
 def create_email_verify_code(user_id, email):
@@ -1283,11 +1300,24 @@ def verify_email():
             return redirect('/chats')
     flash = session.pop('verify_flash', '')
     send_error = session.pop('verify_error', '')
+    
+    # جلب آخر رمز تم إنشاؤه لعرضه في حالة فشل الإرسال (لأغراض التجربة أو في حالة تعطل SMTP)
+    last_code_row = db().execute("SELECT code FROM email_verify_codes WHERE user_id=? AND used=0 ORDER BY id DESC LIMIT 1", (uid,)).fetchone()
+    last_code = last_code_row['code'] if last_code_row else '------'
+
     info_box = ''
     if flash:
         info_box = f"<div class='card' style='border-color:#22c55e;color:#bbf7d0'>✅ {h(flash)}</div>"
     if send_error:
-        info_box = f"<div class='card' style='border-color:#ef4444;color:#fecaca'>⚠️ {h(send_error)}</div>"
+        # إذا فشل الإرسال، نعرض الرمز للمستخدم مباشرة لضمان قدرته على الدخول
+        info_box = f"""
+        <div class='card' style='border-color:#ef4444;color:#fecaca'>
+            ⚠️ {h(send_error)}<br>
+            <div style='margin-top:10px;padding:10px;background:rgba(255,255,255,0.05);border-radius:12px;text-align:center'>
+                <span class='muted'>رمز التحقق (للتجربة):</span> <b style='font-size:20px;color:#fff;letter-spacing:4px'>{last_code}</b>
+            </div>
+        </div>"""
+        
     email = h(u['email'])
     return page(f"""
     <div class='top'><a class='icon' href='/login'>‹</a><b>تحقق البريد</b></div>
