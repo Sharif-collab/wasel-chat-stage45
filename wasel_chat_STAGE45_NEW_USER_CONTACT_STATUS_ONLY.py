@@ -578,19 +578,10 @@ def create_email_verify_code(user_id, email):
 
 فريق واصل شات
 """
-    # إرسال البريد في الخلفية لضمان سرعة استجابة الموقع للمستخدم
-    def send_bg():
-        try:
-            # نفتح اتصال جديد لقاعدة البيانات داخل الـ thread إذا لزم الأمر، 
-            # ولكن هنا فقط نحتاج لإرسال البريد.
-            send_mail(email, "رمز تحقق واصل شات", body)
-        except Exception as e:
-            print(f"BG_EMAIL_ERROR: {e}")
-
-    threading.Thread(target=send_bg, daemon=True).start()
-    
-    # نعيد True دائماً للواجهة لأن الإرسال بدأ في الخلفية، والسرعة ستكون فائقة
-    return code, True, "SENDING_IN_BACKGROUND"
+    # تم تغيير الإرسال ليكون متزامناً (Synchronous) لضمان إبلاغ المستخدم بالحالة الحقيقية للإرسال.
+    # إذا كان هناك خطأ في الإعدادات أو الشبكة، سيظهر للمستخدم فوراً بدلاً من إيهامه بالنجاح.
+    ok, info = send_mail(email, "رمز تحقق واصل شات", body)
+    return code, ok, info
 
 
 def verify_pending_user_id():
@@ -1244,7 +1235,7 @@ def register():
             session['pending_verify_user_id'] = uid
             session['pending_verify_email'] = email
             if ok:
-                session['verify_flash'] = 'تم إرسال رمز التحقق إلى بريدك الإلكتروني.'
+                session['verify_flash'] = 'تم إرسال رمز التحقق بنجاح إلى بريدك الإلكتروني.'
                 session.pop('verify_error', None)
             else:
                 session['verify_error'] = 'تعذر إرسال رمز التحقق الآن. تأكد من اتصال الإنترنت أو اضغط إعادة إرسال.'
@@ -1275,7 +1266,7 @@ def login():
                 session['pending_verify_user_id'] = u['id']
                 session['pending_verify_email'] = u['email']
                 if ok:
-                    session['verify_flash'] = 'تم إرسال رمز تحقق جديد إلى بريدك الإلكتروني.'
+                    session['verify_flash'] = 'تم إرسال رمز تحقق جديد بنجاح إلى بريدك الإلكتروني.'
                     session.pop('verify_error', None)
                 else:
                     session['verify_error'] = 'تعذر إرسال رمز التحقق الآن. اضغط إعادة إرسال بعد لحظات.'
@@ -1361,7 +1352,7 @@ def resend_verify_email():
         return redirect('/login')
     code, ok, info = create_email_verify_code(uid, u['email'])
     if ok:
-        session['verify_flash'] = 'تم إرسال رمز تحقق جديد إلى بريدك الإلكتروني.'
+        session['verify_flash'] = 'تم إرسال رمز تحقق جديد بنجاح إلى بريدك الإلكتروني.'
         session.pop('verify_error', None)
     else:
         session['verify_error'] = 'تعذر إرسال رمز التحقق. تأكد من الإنترنت ثم جرّب إعادة الإرسال.'
@@ -1403,11 +1394,12 @@ def forgot():
             db().execute("INSERT INTO reset_codes(ident,code,expires_at,created_at) VALUES(?,?,?,?)", (ident, code, exp, now()))
             db().commit()
             if u['email']:
-                # إرسال بريد استعادة كلمة المرور في الخلفية للسرعة
-                def send_reset_bg():
-                    send_mail(u['email'], 'رمز استعادة كلمة مرور واصل شات', f'رمز استعادة كلمة المرور هو: {code}\nالرمز صالح لمدة 10 دقائق.')
-                threading.Thread(target=send_reset_bg, daemon=True).start()
-                msg = 'تم إرسال رمز استعادة كلمة المرور إلى البريد (جاري الإرسال...)'
+                # تم تغيير الإرسال ليكون متزامناً لضمان دقة الحالة المعروضة للمستخدم.
+                ok, info = send_mail(u['email'], 'رمز استعادة كلمة مرور واصل شات', f'رمز استعادة كلمة المرور هو: {code}\nالرمز صالح لمدة 10 دقائق.')
+                if ok:
+                    msg = 'تم إرسال رمز استعادة كلمة المرور بنجاح إلى بريدك الإلكتروني.'
+                else:
+                    msg = f'تعذر إرسال البريد: {info}. تأكد من الإنترنت أو جرب لاحقاً.'
             else:
                 code_show = f"<div class='card'><b>رمز التجربة:</b> <span class='badge'>{code}</span></div>"
                 msg = 'تم إنشاء رمز استعادة كلمة المرور'
