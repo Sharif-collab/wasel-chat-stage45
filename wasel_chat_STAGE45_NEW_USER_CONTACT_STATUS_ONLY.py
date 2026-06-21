@@ -532,18 +532,25 @@ def send_mail(to_email, subject, body):
         msg["To"] = to_email
         
         # استخدام context manager لضمان إغلاق الاتصال
-        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=25) as server:
+        # تم زيادة المهلة إلى 45 ثانية لتجنب مشاكل الشبكة في Render
+        print(f"DEBUG: Attempting to connect to {EMAIL_HOST}:{EMAIL_PORT}")
+        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=45) as server:
             server.ehlo()
             if server.has_extn("STARTTLS"):
+                print("DEBUG: STARTTLS supported, starting TLS...")
                 server.starttls()
                 server.ehlo()
             
             try:
+                print(f"DEBUG: Logging in as {EMAIL_USER}...")
                 server.login(EMAIL_USER, EMAIL_PASS)
-            except smtplib.SMTPAuthenticationError:
+            except smtplib.SMTPAuthenticationError as auth_err:
+                print(f"DEBUG: Auth failed: {auth_err}")
                 return False, "AUTHENTICATION_FAILED"
             
+            print(f"DEBUG: Sending email to {to_email}...")
             server.sendmail(EMAIL_USER, [to_email], msg.as_string())
+            print("DEBUG: Email sent successfully!")
             
         return True, "SENT_SUCCESSFULLY"
     except Exception as e:
