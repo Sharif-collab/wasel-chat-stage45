@@ -33,6 +33,14 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = Flask(__name__)
 
+# ضمان تهيئة قاعدة البيانات عند بدء التطبيق (مهم للتشغيل عبر Gunicorn)
+with app.app_context():
+    try:
+        # سنقوم بتعريف init_db لاحقاً، لذا سنستدعيها بعد تعريفها أو نضع الاستدعاء في نهاية الملف
+        pass
+    except Exception as e:
+        print(f"DB Init Error: {e}")
+
 def load_secret_key():
     env_key = os.environ.get("WASEL_SECRET_KEY")
     if env_key and len(env_key) >= 32:
@@ -237,6 +245,8 @@ def file_too_large(e):
 
 @app.errorhandler(500)
 def internal_error(e):
+    if wants_json():
+        return jsonify({'ok': False, 'message': 'حدث خطأ داخلي في الخادم. تأكد من تهيئة قاعدة البيانات.'}), 500
     return page("<div class='top'><a class='icon' href='/chats'>‹</a><b>حدث خطأ</b></div><div class='card'>حدث خطأ داخلي. أعد تشغيل الصفحة، وإذا تكرر الخطأ أرسل آخر سطر من Termux.</div>"), 500
 
 
@@ -3239,7 +3249,9 @@ def uploads(filename):
     return send_from_directory(UPLOAD_DIR, filename)
 
 
+# تهيئة قاعدة البيانات عند الاستيراد لضمان العمل على Gunicorn
+init_db()
+
 if __name__ == '__main__':
-    init_db()
-    print('✅ واصل شات المرحلة 40 - واجهة المحادثات الجديدة تعمل على: http://127.0.0.1:5000')
+    print('✅ واصل شات المرحلة 45 - تعمل على: http://127.0.0.1:5000')
     app.run(host='0.0.0.0', port=5000, debug=False)
