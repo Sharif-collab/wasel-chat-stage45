@@ -16,11 +16,7 @@ import re
 import time
 import secrets
 import smtplib
-import threading
 import gzip
-from queue import Queue
-import gzip
-from queue import Queue
 from email.mime.text import MIMEText
 from email.header import Header
 escape = html.escape
@@ -69,17 +65,15 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_DIR
 app.config["MAX_CONTENT_LENGTH"] = 80 * 1024 * 1024
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-EMAIL_QUEUE = Queue(maxsize=200)
-EMAIL_WORKER_THREAD = None
-EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10") or 10)
+
 app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("WASEL_HTTPS"))
 
 LOGIN_ATTEMPTS = {}
 
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587") or 587)
-EMAIL_USER = os.environ.get("EMAIL_USER", "mebisin575@gmail.com")
-EMAIL_PASS = os.environ.get("EMAIL_PASS", "hsyh jzaw qbww qagy")
+EMAIL_USER = os.environ.get("EMAIL_USER", "mjbbdalhafz6@gmail.com")
+EMAIL_PASS = os.environ.get("EMAIL_PASS", "qdjy dfss tbol aunp")
 EMAIL_FROM = os.environ.get("EMAIL_FROM", "واصل شات")
 
 ALLOWED_EXT = {"png", "jpg", "jpeg", "gif", "webp", "mp4", "webm", "mp3", "wav", "ogg", "pdf", "doc", "docx", "txt", "zip"}
@@ -546,55 +540,22 @@ def smtp_ready():
     return bool(EMAIL_HOST and EMAIL_PORT and EMAIL_USER and EMAIL_PASS)
 
 
-def email_worker():
-    """عامل يعمل في الخلفية لإرسال رسائل البريد الإلكتروني دون تعطيل المستخدم."""
-    print("DEBUG: Email worker started.")
-    while True:
-        try:
-            task = EMAIL_QUEUE.get()
-            if task is None: break
-            to_email, subject, body = task
-            send_mail_sync(to_email, subject, body)
-            EMAIL_QUEUE.task_done()
-        except Exception as e:
-            print(f"DEBUG: Email worker error: {e}")
-
-def start_email_worker():
-    global EMAIL_WORKER_THREAD
-    if EMAIL_WORKER_THREAD is None or not EMAIL_WORKER_THREAD.is_alive():
-        EMAIL_WORKER_THREAD = threading.Thread(target=email_worker, daemon=True)
-        EMAIL_WORKER_THREAD.start()
-
-def send_mail_sync(to_email, subject, body):
-    """الإرسال الفعلي المتزامن (يُستدعى من العامل)."""
-    if not smtp_ready(): return False, "SMTP_NOT_CONFIGURED"
+def send_mail(to_email, subject, body):
+    if not smtp_ready():
+        return False, "SMTP غير مضبوط"
     try:
         msg = MIMEText(body, "plain", "utf-8")
         msg["Subject"] = Header(subject, "utf-8")
-        msg["From"] = f"{Header(EMAIL_FROM, 'utf-8')} <{EMAIL_USER}>"
+        msg["From"] = str(Header(EMAIL_FROM, "utf-8")) + f" <{EMAIL_USER}>"
         msg["To"] = to_email
-        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=EMAIL_TIMEOUT) as server:
-            server.ehlo()
-            if server.has_extn("STARTTLS"):
-                server.starttls()
-                server.ehlo()
+        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=20) as server:
+            server.starttls()
             server.login(EMAIL_USER, EMAIL_PASS)
             server.sendmail(EMAIL_USER, [to_email], msg.as_string())
-        print(f"DEBUG: Email sent to {to_email}")
-        return True, "SENT"
+        return True, "تم الإرسال"
     except Exception as e:
-        print(f"SMTP_ERROR: {e}")
+        print("EMAIL_SEND_ERROR:", e)
         return False, str(e)
-
-def send_mail(to_email, subject, body):
-    """إرسال بريد إلكتروني (غير متزامن افتراضياً لتحسين الأداء)."""
-    start_email_worker()
-    try:
-        EMAIL_QUEUE.put_nowait((to_email, subject, body))
-        return True, "QUEUED"
-    except:
-        # إذا امتلأت القائمة، نحاول الإرسال المتزامن كحل أخير
-        return send_mail_sync(to_email, subject, body)
 
 def create_email_verify_code(user_id, email):
     code = make_code()
@@ -3323,16 +3284,11 @@ def uploads(filename):
     return send_from_directory(UPLOAD_DIR, filename)
 
 
-# تهيئة قاعدة البيانات عند الاستيراد لضمان العمل على Gunicorn
+# تهيئة قاعدة البيانات عند الاستيراد لضمان العمل على Gunicorn (Render)
 init_db()
 
 if __name__ == '__main__':
-    print('✅ واصل شات المرحلة 45 - تعمل على: http://127.0.0.1:5000')
-    app.run(host='0.0.0.0', port=5000, debug=False)
-
-# تهيئة قاعدة البيانات عند بدء التطبيق
-init_db()
-
-if __name__ == "__main__":
     # تشغيل التطبيق في الوضع المحلي إذا تم تشغيل الملف مباشرة
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+    port = int(os.environ.get("PORT", 5000))
+    print(f'✅ واصل شات المرحلة 45 - تعمل على: http://127.0.0.1:{port}')
+    app.run(host='0.0.0.0', port=port, debug=False)
