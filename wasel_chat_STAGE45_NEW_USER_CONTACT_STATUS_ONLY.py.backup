@@ -17,10 +17,6 @@ import time
 import secrets
 import smtplib
 import threading
-import gzip
-from queue import Queue
-import gzip
-from queue import Queue
 from email.mime.text import MIMEText
 from email.header import Header
 escape = html.escape
@@ -28,7 +24,7 @@ from datetime import datetime, date, timedelta
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
-from flask import Flask, request, redirect, url_for, session, g, send_from_directory, jsonify, abort, make_response
+from flask import Flask, request, redirect, url_for, session, g, send_from_directory, jsonify, abort
 
 APP_NAME = "واصل شات"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -69,18 +65,12 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_DIR
 app.config["MAX_CONTENT_LENGTH"] = 80 * 1024 * 1024
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-EMAIL_QUEUE = Queue(maxsize=100)
-EMAIL_WORKER_RUNNING = False
-EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "15") or 15)
 app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("WASEL_HTTPS"))
 
 LOGIN_ATTEMPTS = {}
-EMAIL_QUEUE = Queue(maxsize=100)  # قائمة انتظار لرسائل البريد غير المتزامنة
-EMAIL_WORKER_RUNNING = False  # علم لتتبع حالة العامل
 
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587") or 587)
-EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "15") or 15)  # تقليل timeout من 45 إلى 15 ثانية
 # إعدادات إرسال رمز التحقق الحقيقي من Gmail داخل نفس الملف
 # يمكن تغييرها لاحقاً من متغيرات البيئة بدون تعديل الملف
 EMAIL_USER = os.environ.get("EMAIL_USER", "mjbbdalhafz6@gmail.com")
@@ -274,20 +264,6 @@ def close_db(_=None):
     if con:
         con.close()
 
-
-@app.after_request
-def after_request_optimization(response):
-    if request.path.startswith("/static/") or request.path.startswith("/uploads/"):
-        response.cache_control.max_age = 86400
-        response.headers["ETag"] = f"\"{hash(response.data)}\""
-    if response.content_length and response.content_length > 1024:
-        if "gzip" in request.headers.get("Accept-Encoding", ""):
-            try:
-                response.data = gzip.compress(response.data)
-                response.headers["Content-Encoding"] = "gzip"
-                response.headers["Content-Length"] = len(response.data)
-            except: pass
-    return response
 
 def init_db():
     con = sqlite3.connect(DB_PATH)
@@ -559,7 +535,7 @@ def send_mail(to_email, subject, body):
         # استخدام context manager لضمان إغلاق الاتصال
         # تم زيادة المهلة إلى 45 ثانية لتجنب مشاكل الشبكة في Render
         print(f"DEBUG: Attempting to connect to {EMAIL_HOST}:{EMAIL_PORT}")
-        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=EMAIL_TIMEOUT) as server:
+        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=45) as server:
             server.ehlo()
             if server.has_extn("STARTTLS"):
                 print("DEBUG: STARTTLS supported, starting TLS...")

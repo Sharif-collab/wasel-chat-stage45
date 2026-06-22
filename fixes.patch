@@ -1,0 +1,10 @@
+--- a/wasel_chat_STAGE45_NEW_USER_CONTACT_STATUS_ONLY.py
++++ b/wasel_chat_STAGE45_NEW_USER_CONTACT_STATUS_ONLY.py
+@@ -1,6 +1,6 @@
+ # -*- coding: utf-8 -*-
+ """
+-واصل شات - المرحلة 44 - تحقق بريد حقيقي Gmail داخل نفس الملف
++واصل شات - المرحلة 45 - محسّنة مع إصلاح الأخطاء وتحسين الأداء
+ تشغيل في Termux:
+     pip install flask werkzeug
+     python wasel_chat_STAGE44_REAL_EMAIL_VERIFY_GMAIL_INSIDE.py
