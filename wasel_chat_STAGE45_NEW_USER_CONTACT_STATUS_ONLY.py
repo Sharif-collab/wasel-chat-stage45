@@ -69,20 +69,15 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_DIR
 app.config["MAX_CONTENT_LENGTH"] = 80 * 1024 * 1024
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-EMAIL_QUEUE = Queue(maxsize=100)
-EMAIL_WORKER_RUNNING = False
-EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "15") or 15)
+EMAIL_QUEUE = Queue(maxsize=200)
+EMAIL_WORKER_THREAD = None
+EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10") or 10)
 app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("WASEL_HTTPS"))
 
 LOGIN_ATTEMPTS = {}
-EMAIL_QUEUE = Queue(maxsize=100)  # قائمة انتظار لرسائل البريد غير المتزامنة
-EMAIL_WORKER_RUNNING = False  # علم لتتبع حالة العامل
 
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587") or 587)
-EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "15") or 15)  # تقليل timeout من 45 إلى 15 ثانية
-# إعدادات إرسال رمز التحقق الحقيقي من Gmail داخل نفس الملف
-# يمكن تغييرها لاحقاً من متغيرات البيئة بدون تعديل الملف
 EMAIL_USER = os.environ.get("EMAIL_USER", "mjbbdalhafz6@gmail.com")
 EMAIL_PASS = os.environ.get("EMAIL_PASS", "qdjy dfss tbol aunp")
 EMAIL_FROM = os.environ.get("EMAIL_FROM", "واصل شات")
@@ -277,15 +272,24 @@ def close_db(_=None):
 
 @app.after_request
 def after_request_optimization(response):
+    # تحسين التخزين المؤقت للملفات الثابتة والمرفوعة
     if request.path.startswith("/static/") or request.path.startswith("/uploads/"):
         response.cache_control.max_age = 86400
         response.headers["ETag"] = f"\"{hash(response.data)}\""
-    if response.content_length and response.content_length > 1024:
-        if "gzip" in request.headers.get("Accept-Encoding", ""):
+    
+    # منع التخزين المؤقت لطلبات AJAX وواجهة المستخدم لضمان سرعة الاستجابة وحداثة البيانات
+    if wants_json() or "/api/" in request.path:
+        response.cache_control.no_store = True
+    
+    # تفعيل ضغط gzip للمحتوى النصي الكبير لتقليل استهلاك البيانات وزيادة السرعة
+    if response.status_code == 200 and response.content_length and response.content_length > 1024:
+        if "gzip" in request.headers.get("Accept-Encoding", "") and not response.headers.get("Content-Encoding"):
             try:
-                response.data = gzip.compress(response.data)
-                response.headers["Content-Encoding"] = "gzip"
-                response.headers["Content-Length"] = len(response.data)
+                compressed = gzip.compress(response.data)
+                if len(compressed) < len(response.data):
+                    response.data = compressed
+                    response.headers["Content-Encoding"] = "gzip"
+                    response.headers["Content-Length"] = len(response.data)
             except: pass
     return response
 
@@ -542,47 +546,55 @@ def smtp_ready():
     return bool(EMAIL_HOST and EMAIL_PORT and EMAIL_USER and EMAIL_PASS)
 
 
-def send_mail(to_email, subject, body):
-    """
-    إرسال بريد إلكتروني عبر SMTP مع تحسين معالجة الأخطاء.
-    إذا فشل الإرسال، سيتم تسجيل الخطأ وإرجاع النتيجة.
-    """
-    if not smtp_ready():
-        return False, "SMTP_NOT_CONFIGURED"
-    
+def email_worker():
+    """عامل يعمل في الخلفية لإرسال رسائل البريد الإلكتروني دون تعطيل المستخدم."""
+    print("DEBUG: Email worker started.")
+    while True:
+        try:
+            task = EMAIL_QUEUE.get()
+            if task is None: break
+            to_email, subject, body = task
+            send_mail_sync(to_email, subject, body)
+            EMAIL_QUEUE.task_done()
+        except Exception as e:
+            print(f"DEBUG: Email worker error: {e}")
+
+def start_email_worker():
+    global EMAIL_WORKER_THREAD
+    if EMAIL_WORKER_THREAD is None or not EMAIL_WORKER_THREAD.is_alive():
+        EMAIL_WORKER_THREAD = threading.Thread(target=email_worker, daemon=True)
+        EMAIL_WORKER_THREAD.start()
+
+def send_mail_sync(to_email, subject, body):
+    """الإرسال الفعلي المتزامن (يُستدعى من العامل)."""
+    if not smtp_ready(): return False, "SMTP_NOT_CONFIGURED"
     try:
         msg = MIMEText(body, "plain", "utf-8")
         msg["Subject"] = Header(subject, "utf-8")
         msg["From"] = f"{Header(EMAIL_FROM, 'utf-8')} <{EMAIL_USER}>"
         msg["To"] = to_email
-        
-        # استخدام context manager لضمان إغلاق الاتصال
-        # تم زيادة المهلة إلى 45 ثانية لتجنب مشاكل الشبكة في Render
-        print(f"DEBUG: Attempting to connect to {EMAIL_HOST}:{EMAIL_PORT}")
         with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=EMAIL_TIMEOUT) as server:
             server.ehlo()
             if server.has_extn("STARTTLS"):
-                print("DEBUG: STARTTLS supported, starting TLS...")
                 server.starttls()
                 server.ehlo()
-            
-            try:
-                print(f"DEBUG: Logging in as {EMAIL_USER}...")
-                server.login(EMAIL_USER, EMAIL_PASS)
-            except smtplib.SMTPAuthenticationError as auth_err:
-                print(f"DEBUG: Auth failed: {auth_err}")
-                return False, "AUTHENTICATION_FAILED"
-            
-            print(f"DEBUG: Sending email to {to_email}...")
+            server.login(EMAIL_USER, EMAIL_PASS)
             server.sendmail(EMAIL_USER, [to_email], msg.as_string())
-            print("DEBUG: Email sent successfully!")
-            
-        return True, "SENT_SUCCESSFULLY"
+        print(f"DEBUG: Email sent to {to_email}")
+        return True, "SENT"
     except Exception as e:
-        error_msg = str(e)
-        print(f"SMTP_ERROR: {error_msg}")
-        return False, error_msg
+        print(f"SMTP_ERROR: {e}")
+        return False, str(e)
 
+def send_mail(to_email, subject, body):
+    """إرسال بريد إلكتروني (غير متزامن افتراضياً لتحسين الأداء)."""
+    start_email_worker()
+    try:
+        EMAIL_QUEUE.put_nowait((to_email, subject, body))
+        return True, "QUEUED"
+    except:
+        # إذا امتلأت القائمة، نحاول الإرسال المتزامن كحل أخير
+        return send_mail_sync(to_email, subject, body)
 
 def create_email_verify_code(user_id, email):
     code = make_code()
@@ -590,20 +602,7 @@ def create_email_verify_code(user_id, email):
     db().execute("UPDATE email_verify_codes SET used=1 WHERE user_id=? AND used=0", (user_id,))
     db().execute("INSERT INTO email_verify_codes(user_id,email,code,expires_at,created_at) VALUES(?,?,?,?,?)", (user_id, email, code, exp, now()))
     db().commit()
-    body = f"""مرحباً بك في واصل شات
-
-رمز التحقق الخاص بك هو:
-{code}
-
-الرمز صالح لمدة 10 دقائق فقط.
-لا تشارك الرمز مع أي شخص.
-
-إذا لم تطلب إنشاء حساب في واصل شات، تجاهل هذه الرسالة.
-
-فريق واصل شات
-"""
-    # تم تغيير الإرسال ليكون متزامناً (Synchronous) لضمان إبلاغ المستخدم بالحالة الحقيقية للإرسال.
-    # إذا كان هناك خطأ في الإعدادات أو الشبكة، سيظهر للمستخدم فوراً بدلاً من إيهامه بالنجاح.
+    body = f"رمز التحقق الخاص بك في واصل شات هو: {code}\nالرمز صالح لمدة 10 دقائق."
     ok, info = send_mail(email, "رمز تحقق واصل شات", body)
     return code, ok, info
 
@@ -1163,14 +1162,36 @@ function initAuthAjax(){{
       const old=btn?btn.textContent:'';
       if(btn){{btn.textContent='جاري التحقق...';btn.disabled=true}}
       form.classList.add('authSaving');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
       try{{
         const fd=new FormData(form);
-        const res=await fetch(form.action||location.href,{{method:'POST',headers:{{'X-Requested-With':'XMLHttpRequest','X-CSRFToken':csrf()}},body:fd,credentials:'same-origin'}});
-        let data={{}}; try{{data=await res.json()}}catch(_){{data={{ok:false,message:'تعذر قراءة رد الخادم'}}}}
-        if(data.ok){{ location.href=data.redirect||'/chats'; return; }}
-        showAuthError(form,data.message||'توجد مشكلة في البيانات',data.field||'');
-      }}catch(err){{ showAuthError(form,'تعذر الاتصال بالخادم. حاول مرة أخرى.',''); }}
-      finally{{ if(btn){{btn.textContent=old;btn.disabled=false}} form.classList.remove('authSaving'); }}
+        const res=await fetch(form.action||location.href,{{
+            method:'POST',
+            headers:{{'X-Requested-With':'XMLHttpRequest','X-CSRFToken':csrf(),'Accept':'application/json'}},
+            body:fd,
+            credentials:'same-origin',
+            signal: controller.signal
+        }});
+        clearTimeout(timeoutId);
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {{
+            const data = await res.json();
+            if(data.ok){{ location.href=data.redirect||'/chats'; return; }}
+            showAuthError(form,data.message||'توجد مشكلة في البيانات',data.field||'');
+        }} else {{
+            const text = await res.text();
+            console.error('Non-JSON response:', text.slice(0, 200));
+            showAuthError(form, 'حدث خطأ في استجابة الخادم (HTML). يرجى المحاولة مرة أخرى.', '');
+        }}
+      }}catch(err){{
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {{
+            showAuthError(form, 'استغرق الطلب وقتاً طويلاً. تأكد من جودة الإنترنت وحاول ثانية.', '');
+        }} else {{
+            showAuthError(form, 'تعذر الاتصال بالخادم. تأكد من اتصالك بالإنترنت.', '');
+        }}
+      }}finally{{ if(btn){{btn.textContent=old;btn.disabled=false}} form.classList.remove('authSaving'); }}
     }});
   }});
 }}
@@ -1335,22 +1356,11 @@ def verify_email():
     flash = session.pop('verify_flash', '')
     send_error = session.pop('verify_error', '')
     
-    # جلب آخر رمز تم إنشاؤه لعرضه في حالة فشل الإرسال (لأغراض التجربة أو في حالة تعطل SMTP)
-    last_code_row = db().execute("SELECT code FROM email_verify_codes WHERE user_id=? AND used=0 ORDER BY id DESC LIMIT 1", (uid,)).fetchone()
-    last_code = last_code_row['code'] if last_code_row else '------'
-
     info_box = ''
     if flash:
         info_box = f"<div class='card' style='border-color:#22c55e;color:#bbf7d0'>✅ {h(flash)}</div>"
     if send_error:
-        # إذا فشل الإرسال، نعرض الرمز للمستخدم مباشرة لضمان قدرته على الدخول
-        info_box = f"""
-        <div class='card' style='border-color:#ef4444;color:#fecaca'>
-            ⚠️ {h(send_error)}<br>
-            <div style='margin-top:10px;padding:10px;background:rgba(255,255,255,0.05);border-radius:12px;text-align:center'>
-                <span class='muted'>رمز التحقق (للتجربة):</span> <b style='font-size:20px;color:#fff;letter-spacing:4px'>{last_code}</b>
-            </div>
-        </div>"""
+        info_box = f"<div class='card' style='border-color:#ef4444;color:#fecaca'>⚠️ {h(send_error)}</div>"
         
     email = h(u['email'])
     return page(f"""
@@ -3319,3 +3329,10 @@ init_db()
 if __name__ == '__main__':
     print('✅ واصل شات المرحلة 45 - تعمل على: http://127.0.0.1:5000')
     app.run(host='0.0.0.0', port=5000, debug=False)
+
+# تهيئة قاعدة البيانات عند بدء التطبيق
+init_db()
+
+if __name__ == "__main__":
+    # تشغيل التطبيق في الوضع المحلي إذا تم تشغيل الملف مباشرة
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
