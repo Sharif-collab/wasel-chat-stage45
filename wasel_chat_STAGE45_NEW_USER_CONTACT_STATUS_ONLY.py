@@ -212,6 +212,9 @@ def security_before_request():
         sent = request.form.get("_csrf_token") or request.headers.get("X-CSRFToken")
         expected = session.get("_csrf_token")
         if not expected or sent != expected:
+            # في Render، قد تتغير الجلسة أو ينتهي التوكن، لذا نعطي رسالة واضحة بدلاً من 400 صامت
+            if wants_json():
+                return jsonify({'ok': False, 'message': 'انتهت صلاحية الصفحة، يرجى تحديثها والمحاولة مرة أخرى', 'field': 'csrf'}), 400
             abort(400)
     return None
 
@@ -1228,7 +1231,8 @@ def register():
             db().commit()
             uid = cur.lastrowid
             code, ok, info = create_email_verify_code(uid, email)
-            session.clear(); session['_csrf_token'] = secrets.token_urlsafe(32)
+            # لا نحذف الجلسة بالكامل لتجنب فقدان التوكن في بعض المتصفحات، بل نحدث البيانات المطلوبة فقط
+            session.pop('user_id', None)
             session['pending_verify_user_id'] = uid
             session['pending_verify_email'] = email
             if ok:
@@ -1259,7 +1263,7 @@ def login():
         if u and check_password_hash(u['password_hash'], password):
             if u['email'] and ('is_verified' in u.keys()) and not u['is_verified']:
                 code, ok, info = create_email_verify_code(u['id'], u['email'])
-                session.clear(); session['_csrf_token'] = secrets.token_urlsafe(32)
+                session.pop('user_id', None)
                 session['pending_verify_user_id'] = u['id']
                 session['pending_verify_email'] = u['email']
                 if ok:
@@ -1270,8 +1274,12 @@ def login():
                     print('EMAIL_VERIFY_SEND_ERROR:', info)
                 return auth_success('/verify_email')
             LOGIN_ATTEMPTS.pop(ip, None)
-            session.clear(); session['_csrf_token'] = secrets.token_urlsafe(32)
-            session['user_id'] = u['id']; db().execute("UPDATE users SET online=1, last_login_at=? WHERE id=?", (now(), u['id'])); db().commit()
+            # عند تسجيل الدخول الناجح، نكتفي بتعيين معرف المستخدم دون مسح الجلسة بالكامل للحفاظ على استقرار التوكن في Render
+            session.pop('pending_verify_user_id', None)
+            session.pop('pending_verify_email', None)
+            session['user_id'] = u['id']
+            db().execute("UPDATE users SET online=1, last_login_at=? WHERE id=?", (now(), u['id']))
+            db().commit()
             return auth_success('/chats')
         rec['count'] = rec.get('count', 0) + 1
         if rec['count'] >= 7:
@@ -1302,7 +1310,8 @@ def verify_email():
             db().execute("UPDATE users SET is_verified=1, email_verified_at=? WHERE id=?", (now(), uid))
             db().execute("UPDATE users SET online=1, last_login_at=? WHERE id=?", (now(), uid))
             db().commit()
-            session.clear(); session['_csrf_token'] = secrets.token_urlsafe(32)
+            session.pop('pending_verify_user_id', None)
+            session.pop('pending_verify_email', None)
             session['user_id'] = uid
             return redirect('/chats')
     flash = session.pop('verify_flash', '')
