@@ -78,8 +78,8 @@ LOGIN_ATTEMPTS = {}
 
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587") or 587)
-EMAIL_USER = os.environ.get("EMAIL_USER", "mjbbdalhafz6@gmail.com")
-EMAIL_PASS = os.environ.get("EMAIL_PASS", "qdjy dfss tbol aunp")
+EMAIL_USER = os.environ.get("EMAIL_USER", "mebisin575@gmail.com")
+EMAIL_PASS = os.environ.get("EMAIL_PASS", "hsyh jzaw qbww qagy")
 EMAIL_FROM = os.environ.get("EMAIL_FROM", "واصل شات")
 
 ALLOWED_EXT = {"png", "jpg", "jpeg", "gif", "webp", "mp4", "webm", "mp3", "wav", "ogg", "pdf", "doc", "docx", "txt", "zip"}
