@@ -16,7 +16,6 @@ import re
 import time
 import secrets
 import smtplib
-import gzip
 from email.mime.text import MIMEText
 from email.header import Header
 escape = html.escape
@@ -24,23 +23,15 @@ from datetime import datetime, date, timedelta
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
-from flask import Flask, request, redirect, url_for, session, g, send_from_directory, jsonify, abort, make_response
+from flask import Flask, request, redirect, url_for, session, g, send_from_directory, jsonify, abort
 
-APP_NAME = "واصل شات"
+APP_NAME = "賵丕氐賱 卮丕鬲"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "wasel_chat_new.db")
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = Flask(__name__)
-
-# ضمان تهيئة قاعدة البيانات عند بدء التطبيق (مهم للتشغيل عبر Gunicorn)
-with app.app_context():
-    try:
-        # سنقوم بتعريف init_db لاحقاً، لذا سنستدعيها بعد تعريفها أو نضع الاستدعاء في نهاية الملف
-        pass
-    except Exception as e:
-        print(f"DB Init Error: {e}")
 
 def load_secret_key():
     env_key = os.environ.get("WASEL_SECRET_KEY")
@@ -65,40 +56,41 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_DIR
 app.config["MAX_CONTENT_LENGTH"] = 80 * 1024 * 1024
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-
 app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("WASEL_HTTPS"))
 
 LOGIN_ATTEMPTS = {}
 
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587") or 587)
-EMAIL_USER = os.environ.get("EMAIL_USER", "mjbbdalhafz6@gmail.com")
-EMAIL_PASS = os.environ.get("EMAIL_PASS", "qdjy dfss tbol aunp")
-EMAIL_FROM = os.environ.get("EMAIL_FROM", "واصل شات")
+# 廿毓丿丕丿丕鬲 廿乇爻丕賱 乇賲夭 丕賱鬲丨賯賯 丕賱丨賯賷賯賷 賲賳 Gmail 丿丕禺賱 賳賮爻 丕賱賲賱賮
+# 賷賲賰賳 鬲睾賷賷乇賴丕 賱丕丨賯丕賸 賲賳 賲鬲睾賷乇丕鬲 丕賱亘賷卅丞 亘丿賵賳 鬲毓丿賷賱 丕賱賲賱賮
+EMAIL_USER = os.environ.get("EMAIL_USER", "mebisin575@gmail.com")
+EMAIL_PASS = os.environ.get("EMAIL_PASS", "hsyh jzaw qbww qagy")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "賵丕氐賱 卮丕鬲")
 
 ALLOWED_EXT = {"png", "jpg", "jpeg", "gif", "webp", "mp4", "webm", "mp3", "wav", "ogg", "pdf", "doc", "docx", "txt", "zip"}
 
 
 COUNTRIES = [
-    {"flag":"🇾🇪","name":"اليمن","en":"Yemen","code":"+967","local_re":r"7\d{8}","min":9,"max":9},
-    {"flag":"🇸🇦","name":"السعودية","en":"Saudi Arabia","code":"+966","local_re":r"5\d{8}","min":9,"max":9},
-    {"flag":"🇦🇪","name":"الإمارات","en":"United Arab Emirates","code":"+971","local_re":r"5\d{8}","min":9,"max":9},
-    {"flag":"🇴🇲","name":"عمان","en":"Oman","code":"+968","local_re":r"[279]\d{7}","min":8,"max":8},
-    {"flag":"🇶🇦","name":"قطر","en":"Qatar","code":"+974","local_re":r"[3567]\d{7}","min":8,"max":8},
-    {"flag":"🇰🇼","name":"الكويت","en":"Kuwait","code":"+965","local_re":r"[569]\d{7}","min":8,"max":8},
-    {"flag":"🇧🇭","name":"البحرين","en":"Bahrain","code":"+973","local_re":r"[36]\d{7}","min":8,"max":8},
-    {"flag":"🇪🇬","name":"مصر","en":"Egypt","code":"+20","local_re":r"1\d{9}","min":10,"max":10},
-    {"flag":"🇯🇴","name":"الأردن","en":"Jordan","code":"+962","local_re":r"7\d{8}","min":9,"max":9},
-    {"flag":"🇮🇶","name":"العراق","en":"Iraq","code":"+964","local_re":r"7\d{9}","min":10,"max":10},
-    {"flag":"🇵🇸","name":"فلسطين","en":"Palestine","code":"+970","local_re":r"5\d{8}","min":9,"max":9},
-    {"flag":"🇸🇾","name":"سوريا","en":"Syria","code":"+963","local_re":r"9\d{8}","min":9,"max":9},
-    {"flag":"🇱🇧","name":"لبنان","en":"Lebanon","code":"+961","local_re":r"[37]\d{7}|8\d{6}","min":7,"max":8},
-    {"flag":"🇸🇩","name":"السودان","en":"Sudan","code":"+249","local_re":r"9\d{8}","min":9,"max":9},
-    {"flag":"🇹🇷","name":"تركيا","en":"Turkey","code":"+90","local_re":r"5\d{9}","min":10,"max":10},
-    {"flag":"🇮🇳","name":"الهند","en":"India","code":"+91","local_re":r"[6-9]\d{9}","min":10,"max":10},
-    {"flag":"🇵🇰","name":"باكستان","en":"Pakistan","code":"+92","local_re":r"3\d{9}","min":10,"max":10},
-    {"flag":"🇺🇸","name":"أمريكا","en":"United States","code":"+1","local_re":r"[2-9]\d{9}","min":10,"max":10},
-    {"flag":"🇬🇧","name":"بريطانيا","en":"United Kingdom","code":"+44","local_re":r"7\d{9}","min":10,"max":10},
+    {"flag":"馃嚲馃嚜","name":"丕賱賷賲賳","en":"Yemen","code":"+967","local_re":r"7\d{8}","min":9,"max":9},
+    {"flag":"馃嚫馃嚘","name":"丕賱爻毓賵丿賷丞","en":"Saudi Arabia","code":"+966","local_re":r"5\d{8}","min":9,"max":9},
+    {"flag":"馃嚘馃嚜","name":"丕賱廿賲丕乇丕鬲","en":"United Arab Emirates","code":"+971","local_re":r"5\d{8}","min":9,"max":9},
+    {"flag":"馃嚧馃嚥","name":"毓賲丕賳","en":"Oman","code":"+968","local_re":r"[279]\d{7}","min":8,"max":8},
+    {"flag":"馃嚩馃嚘","name":"賯胤乇","en":"Qatar","code":"+974","local_re":r"[3567]\d{7}","min":8,"max":8},
+    {"flag":"馃嚢馃嚰","name":"丕賱賰賵賷鬲","en":"Kuwait","code":"+965","local_re":r"[569]\d{7}","min":8,"max":8},
+    {"flag":"馃嚙馃嚟","name":"丕賱亘丨乇賷賳","en":"Bahrain","code":"+973","local_re":r"[36]\d{7}","min":8,"max":8},
+    {"flag":"馃嚜馃嚞","name":"賲氐乇","en":"Egypt","code":"+20","local_re":r"1\d{9}","min":10,"max":10},
+    {"flag":"馃嚡馃嚧","name":"丕賱兀乇丿賳","en":"Jordan","code":"+962","local_re":r"7\d{8}","min":9,"max":9},
+    {"flag":"馃嚠馃嚩","name":"丕賱毓乇丕賯","en":"Iraq","code":"+964","local_re":r"7\d{9}","min":10,"max":10},
+    {"flag":"馃嚨馃嚫","name":"賮賱爻胤賷賳","en":"Palestine","code":"+970","local_re":r"5\d{8}","min":9,"max":9},
+    {"flag":"馃嚫馃嚲","name":"爻賵乇賷丕","en":"Syria","code":"+963","local_re":r"9\d{8}","min":9,"max":9},
+    {"flag":"馃嚤馃嚙","name":"賱亘賳丕賳","en":"Lebanon","code":"+961","local_re":r"[37]\d{7}|8\d{6}","min":7,"max":8},
+    {"flag":"馃嚫馃嚛","name":"丕賱爻賵丿丕賳","en":"Sudan","code":"+249","local_re":r"9\d{8}","min":9,"max":9},
+    {"flag":"馃嚬馃嚪","name":"鬲乇賰賷丕","en":"Turkey","code":"+90","local_re":r"5\d{9}","min":10,"max":10},
+    {"flag":"馃嚠馃嚦","name":"丕賱賴賳丿","en":"India","code":"+91","local_re":r"[6-9]\d{9}","min":10,"max":10},
+    {"flag":"馃嚨馃嚢","name":"亘丕賰爻鬲丕賳","en":"Pakistan","code":"+92","local_re":r"3\d{9}","min":10,"max":10},
+    {"flag":"馃嚭馃嚫","name":"兀賲乇賷賰丕","en":"United States","code":"+1","local_re":r"[2-9]\d{9}","min":10,"max":10},
+    {"flag":"馃嚞馃嚙","name":"亘乇賷胤丕賳賷丕","en":"United Kingdom","code":"+44","local_re":r"7\d{9}","min":10,"max":10},
 ]
 COUNTRY_BY_CODE = {c['code']: c for c in COUNTRIES}
 
@@ -138,12 +130,12 @@ def country_picker_html(field_name='country_picker', selected='+967', picker_id=
     return f"""
     <input type='hidden' name='{h(field_name)}' id='{h(field_name)}' value='{h(country_display(current))}'>
     <button type='button' class='countrySelect' onclick="openCountryPicker('{h(picker_id)}','{h(field_name)}')">
-        <span id='{h(field_name)}_label'>{h(country_display(current))}</span><b>›</b>
+        <span id='{h(field_name)}_label'>{h(country_display(current))}</span><b>鈥�</b>
     </button>
     <div class='countryModal' id='{h(picker_id)}'>
         <div class='countrySheet'>
-            <div class='countryHead'><button type='button' class='icon' onclick="closeCountryPicker('{h(picker_id)}')">×</button><b>اختيار الدولة</b></div>
-            <div class='countrySearch'><input type='search' oninput="filterCountries('{h(picker_id)}', this.value)" placeholder='بحث باسم الدولة أو رمزها'></div>
+            <div class='countryHead'><button type='button' class='icon' onclick="closeCountryPicker('{h(picker_id)}')">脳</button><b>丕禺鬲賷丕乇 丕賱丿賵賱丞</b></div>
+            <div class='countrySearch'><input type='search' oninput="filterCountries('{h(picker_id)}', this.value)" placeholder='亘丨孬 亘丕爻賲 丕賱丿賵賱丞 兀賵 乇賲夭賴丕'></div>
             <div class='countryList'>{''.join(rows)}</div>
         </div>
     </div>
@@ -155,13 +147,13 @@ def normalize_phone_by_country(phone, country_value='+967'):
     digits = clean_digits(phone)
     code_digits = clean_digits(c['code'])
     if digits.startswith('00' + code_digits):
-        return None, None, c, 'اكتب الرقم بدون رمز الدولة'
+        return None, None, c, '丕賰鬲亘 丕賱乇賯賲 亘丿賵賳 乇賲夭 丕賱丿賵賱丞'
     if digits.startswith(code_digits) and len(digits) > c.get('max', 15):
-        return None, None, c, 'اكتب الرقم بدون رمز الدولة'
+        return None, None, c, '丕賰鬲亘 丕賱乇賯賲 亘丿賵賳 乇賲夭 丕賱丿賵賱丞'
     if not digits:
-        return None, None, c, 'أدخل رقم الهاتف'
+        return None, None, c, '兀丿禺賱 乇賯賲 丕賱賴丕鬲賮'
     if not re.fullmatch(c['local_re'], digits):
-        return None, None, c, 'رقم الهاتف غير صحيح حسب الدولة المختارة'
+        return None, None, c, '乇賯賲 丕賱賴丕鬲賮 睾賷乇 氐丨賷丨 丨爻亘 丕賱丿賵賱丞 丕賱賲禺鬲丕乇丞'
     full = c['code'] + digits
     return digits, full, c, ''
 
@@ -176,7 +168,7 @@ def normalize_yemeni_phone(phone):
 
 
 def phone_lookup_values(raw):
-    """يعيد قيم محتملة للبحث: رقم محلي، رقم كامل، بريد أو اسم مستخدم."""
+    """賷毓賷丿 賯賷賲 賲丨鬲賲賱丞 賱賱亘丨孬: 乇賯賲 賲丨賱賷貙 乇賯賲 賰丕賲賱貙 亘乇賷丿 兀賵 丕爻賲 賲爻鬲禺丿賲."""
     value = (raw or '').strip().lower()
     if not value:
         return []
@@ -214,7 +206,7 @@ def security_before_request():
     if request.method == "POST":
         if request.path.startswith('/call_signal'):
             return None
-        # طلبات AJAX الخاصة بتفاعلات الحالة/ردود الحالة تعمل من الهاتف بدون كسر بسبب CSRF أو كاش المتصفح
+        # 胤賱亘丕鬲 AJAX 丕賱禺丕氐丞 亘鬲賮丕毓賱丕鬲 丕賱丨丕賱丞/乇丿賵丿 丕賱丨丕賱丞 鬲毓賲賱 賲賳 丕賱賴丕鬲賮 亘丿賵賳 賰爻乇 亘爻亘亘 CSRF 兀賵 賰丕卮 丕賱賲鬲氐賮丨
         if re.fullmatch(r'/status/\d+/react', request.path) or re.fullmatch(r'/status/\d+/reply_msg/\d+/(react|edit|delete)', request.path):
             return None
         sent = request.form.get("_csrf_token") or request.headers.get("X-CSRFToken")
@@ -235,8 +227,7 @@ def security_headers(resp):
 
 @app.errorhandler(400)
 def bad_request_error(e):
-    return page("<div class='top'><a class='icon' href='/chats'>‹</a><b>طلب غير صحيح</b></div><div class='card'>انتهت صلاحية الصفحة أو الطلب غير آمن. ارجع وافتح الصفحة من جديد.</div>"), 400
-
+    return page("<div class='top'><a class='icon' href='/chats'>鈥�</a><b>胤賱亘 睾賷乇 氐丨賷丨</b></div><div class='card'>丕賳鬲賴鬲 氐賱丕丨賷丞 丕賱氐賮丨丞 兀賵 丕賱胤賱亘 睾賷乇 丌賲賳. 丕乇噩毓 賵丕賮鬲丨 丕賱氐賮丨丞 賲賳 噩丿賷丿.</div>"), 400
 
 @app.errorhandler(413)
 def file_too_large(e):
